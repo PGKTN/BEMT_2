@@ -72,12 +72,9 @@ Slope_Cl = 2 * np.pi
 beta = 0
 alpha0 = 0
 
-y = np.zeros(Nsec)
+y = np.zeros(Nsec-1)
 for i in range(len(y)):
-    if(i==0):
-        y[i] = Rhub
-    else:
-        y[i] = R[i] - R[i-1]
+    y[i] = R[i+1] - R[i]
 print('y = ', y)
 
 # Rsec = np.zeros(Nsec-1)
@@ -85,131 +82,184 @@ print('y = ', y)
 #     Rsec[i] = Rhub + y[i]
 # print('Rsec = ', Rsec)
 
-dA = np.zeros(Nsec)
+dA = np.zeros(Nsec-1)
 for i in range(len(dA)):
-    if(i==0):
-        dA[i] = 0
-    else:
-        dA[i] = Chord[i] * y[i]
-print('dA = ', dA)
+    dA[i] = Chord[i] * y[i]
 
-Asec = np.zeros(Nsec)
+Asec = np.zeros(Nsec-1)
 for i in range(len(Asec)):
     for j in range(i+1):
         Asec[i] += dA[j]
-print('Asec = ', Asec)
+A = Asec[Nsec-2]
 
-Sigma = np.zeros(Nsec)
-for i in range(Nsec):
-    Sigma[i] = (Nb * Asec[i]) / (np.pi * R[i]**2)
-print('Sigma = ', Sigma)
+Sigma = np.zeros(Nsec-1)
+for i in range(len(Sigma)):
+    Sigma[i] = (Nb * Asec[i]) / (np.pi * R[i+1]**2)
 
-Vrat = np.zeros(Nsec)
-for i in range(len(Vrat)):
-    Vrat[i] = Vinf / (omega * R[i])
-print('Vrat = ', Vrat)
+# Vrat = np.zeros(Nsec)
+# for i in range(len(Vrat)):
+#     Vrat[i] = Vinf / (omega * R[i])
 
 Theta_star = np.zeros(Nsec)
 for i in range(len(Theta_star)):
     Theta_star[i] = (beta + Theta[i] - alpha0)
-print('Theta_star = ', Theta_star)
 
 Phi_result = np.zeros(Nsec)
+Reynolds = np.zeros(Nsec)
 VR = np.zeros(Nsec)
-
-for i in range(Nsec):
-    xf = XFoil()
-    xf.airfoil = af.naca0012
-    xf.max_iter = 100
-    xf.Re = rho * omega * R[i] * Chord[i] / mu
-    print('xf.Re = ', xf.Re)
-    
-    Cl, Cd, Cm, Cp = xf.a(Theta_star[i])
-    while(np.isnan(Cl) or np.isnan(Cd)):
-        xf.Re += 1000
-        Cl, Cd, Cm, Cp = xf.a(Theta_star[i])
-
-    SigCl = 0.25 * Sigma[i] * Cl
-    SigCd = 0.25 * Sigma[i] * Cd
-    
-    G_left = -(SigCl * (Theta_star[i]*deg2rad) + Vrat[i] * SigCd)
-    G_right = 1 + SigCd + Vrat[i]*SigCl*(np.pi/2 - (Theta_star[i]*deg2rad))
-    
-    Phi_left = 0
-    Phi_right = np.pi / 2
-    
-    G_new = 1
-    while abs(G_new) > epsilon:
-        DelPhi = Phi_right - Phi_left
-        DelG = G_right - G_left
-        Phi_new = Phi_left - (DelPhi / DelG) * G_left
-        
-        SinPhi = np.sin(Phi_new)
-        CosPhi = np.cos(Phi_new)
-        H_phi = SinPhi + SigCd
-        E_phi = SigCl * ((Theta_star[i]*deg2rad) - Phi_new)
-        F_SinPhi = H_phi * SinPhi - E_phi * CosPhi
-        G_new = F_SinPhi - Vrat[i]*(H_phi * CosPhi + E_phi * SinPhi)
-        
-        if G_left * G_new < 0:
-            Phi_right = Phi_new
-            G_right = G_new
-        else:
-            Phi_left = Phi_new
-            G_left = G_new
-            
-        Phi_result[i] = Phi_new * rad2deg
-    VR[i] = omega * R[i] / G_new
-
+G = np.zeros(Nsec)
 alpha = np.zeros(Nsec)
-for i in range(len(alpha)):
-    alpha[i] = Theta_star[i] - Phi_result[i]
-print('alpha = ', alpha)
-
+UP = np.zeros(Nsec)
+UT = np.zeros(Nsec)
+U = np.zeros(Nsec)
+Cl = np.zeros(Nsec)
+Cd = np.zeros(Nsec)
+dL = np.zeros(Nsec)
+dD = np.zeros(Nsec)
 dT = np.zeros(Nsec)
 dQ = np.zeros(Nsec)
-for i in range(Nsec):
-    xf = XFoil()
-    xf.airfoil = af.naca0012
-    xf.max_iter = 100
-    xf.Re = rho * omega * R[i] * Chord[i] / mu
-    print('xf.Re = ', xf.Re)
-    # breakpoint()
+phi = np.zeros(Nsec)
+dFx = np.zeros(Nsec)
+dFz = np.zeros(Nsec)
+
+T_new = 0
+T_old = 10000
+T = 0
+
+Vc = 0
+vi = 0.0001
+
+while np.abs(T_new - T_old) > 1e-2:
+    T_old = T_new
+    T_new = 0
     
-    Cl, Cd ,Cm, Cp = xf.a(alpha[i])
-    while(np.isnan(Cl) or np.isnan(Cd)):
-        xf.Re += 1000
-        Cl, Cd, Cm, Cp = xf.a(alpha[i])
-    print('Cl = ', Cl)
-    print('Cd = ', Cd)
-    # breakpoint()
+    for i in range(Nsec-1):
+        xf = XFoil()
+        xf.airfoil = af.naca0012
+        xf.max_iter = 100
+        Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
+        xf.Re = Reynolds[i]
+        
+        UP[i] = Vc + vi
+        UT[i] = omega * R[i]
+        U[i] = np.sqrt(UT[i]**2 + UP[i]**2)
+        
+        phi[i] = np.arctan(UP[i]/UT[i])
+        alpha[i] = Theta_star[i] - phi[i]
+        
+        Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i])
+        while np.isnan(Cl_) or np.isnan(Cd_):
+            Reynolds[i] += 1000
+            xf.Re = Reynolds[i]
+            Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i])
+        Cl[i] = Cl_
+        Cd[i] = Cd_
+        
+        dL[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cl[i] * y[i]
+        dD[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cd[i] * y[i]
+        
+        dFx[i] = dL[i] * np.sin(phi[i]) + dD[i] * np.cos(phi[i])
+        dFz[i] = dL[i] * np.cos(phi[i]) - dD[i] * np.sin(phi[i])
+        
+        dT[i] = Nb * dFz[i]
+        dQ[i] = Nb * dFx[i] * R[i]
+        
+        T_new += dT[i]
     
-    SinPhi = np.sin(Phi_result[i]*deg2rad)
-    CosPhi = np.cos(Phi_result[i]*deg2rad)
-    SigCl = 0.25 * Sigma[i] * Cl
-    SigCd = 0.25 * Sigma[i] * Cd
-    G = ((CosPhi * (SinPhi + SigCd)) + SigCl*SinPhi)/(SinPhi)
-    
-    VR = omega * R[i] / G
-    if np.isnan(VR):
-        VR = 0
-    print('VR = ', VR)
-    # breakpoint()
-    
-    dT[i] = 0.5 * Nb * Chord[i] * rho * VR**2 * (Cl*CosPhi - Cd*SinPhi) * y[i]
-    dQ[i] = 0.5 * Nb * Chord[i] * rho * VR**2 * (Cl*SinPhi - Cd*CosPhi) * R[i] * y[i]
-    print('Nb = ', Nb)
-    print('Chord[', i, '] = ', Chord[i])
-    print('rho = ', rho)
+    vi = np.sqrt(T_new/(2*rho*A))
+    T = T_new
+    print('T_new = ', T_new)
+    print('T_old = ', T_old)
+
+for i in range(Nsec-1):
+    print('Reynolds[', i, '] = ', Reynolds[i])
+    print('theta[', i, '] = ', Theta[i])
+    print('phi[', i, '] = ', phi[i])
+    print('alpha[', i, '] = ', alpha[i])
+    print('UP[', i, '] = ', UP[i])
+    print('UT[', i, '] = ', UT[i])
+    print('U[', i, '] = ', U[i])
+    print('Cl[', i, '] = ', Cl[i])
+    print('Cd[', i, '] = ', Cd[i])
+    print('dL[', i, '] = ', dL[i])
+    print('dD[', i, '] = ', dD[i])
     print('dT[', i, '] = ', dT[i])
     print('dQ[', i, '] = ', dQ[i])
-    # breakpoint()
-    
-Thrust = 0
-Torque = 0
-for i in range(Nsec):
-    Thrust += 0.5 * dT[i]
-    Torque += 0.5 * dQ[i]
 
-print('Thrust = ', Thrust)
-print('Torque = ', Torque)
+print('Thrust = ', T)
+# for i in range(Nsec):
+#     xf = XFoil()
+#     xf.airfoil = af.naca0012
+#     xf.max_iter = 100
+#     xf.Re = rho * omega * R[i] * Chord[i] / mu
+    
+#     Cl, Cd, Cm, Cp = xf.a(Theta_star[i])
+#     while(np.isnan(Cl) or np.isnan(Cd)):
+#         xf.Re += xf.Re * 1000
+#         Cl, Cd, Cm, Cp = xf.a(Theta_star[i])
+
+#     SigCl = 0.25 * Sigma[i] * Cl
+#     SigCd = 0.25 * Sigma[i] * Cd
+    
+#     G_left = -(SigCl * (Theta_star[i]*deg2rad) + Vrat[i] * SigCd)
+#     G_right = 1 + SigCd + Vrat[i]*SigCl*(np.pi/2 - (Theta_star[i]*deg2rad))
+    
+#     Phi_left = 0
+#     Phi_right = np.pi / 2
+    
+#     G_new = 1
+#     while abs(G_new) > epsilon:
+#         DelPhi = Phi_right - Phi_left
+#         DelG = G_right - G_left
+#         Phi_new = Phi_left - (DelPhi / DelG) * G_left
+        
+#         SinPhi = np.sin(Phi_new)
+#         CosPhi = np.cos(Phi_new)
+#         H_phi = SinPhi + SigCd
+#         E_phi = SigCl * ((Theta_star[i]*deg2rad) - Phi_new)
+#         F_SinPhi = H_phi * SinPhi - E_phi * CosPhi
+#         G_new = F_SinPhi - Vrat[i]*(H_phi * CosPhi + E_phi * SinPhi)
+        
+#         if G_left * G_new < 0:
+#             Phi_right = Phi_new
+#             G_right = G_new
+#         else:
+#             Phi_left = Phi_new
+#             G_left = G_new
+            
+#         Phi_result[i] = Phi_new * rad2deg
+#     VR[i] = omega * R[i] / G_new
+#     G[i] = G_new
+    
+#     alpha[i] = Theta_star[i] - Phi_result[i]
+    
+#     Cl, Cd, Cm, Cp = xf.a(alpha[i])
+#     Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
+#     while(np.isnan(Cl) or np.isnan(Cd)):
+#         Reynolds[i] += 1000
+#         xf.Re = Reynolds[i]
+#         Cl, Cd, Cm, Cp = xf.a(alpha[i])
+        
+#     SinPhi = np.sin(Phi_result[i]*deg2rad)
+#     CosPhi = np.cos(Phi_result[i]*deg2rad)
+    
+#     Cn = Cl*CosPhi - Cd*SinPhi
+#     Ct = Cl*SinPhi + Cd*CosPhi
+    
+#     Bcro = 0.5 * Nb * Chord[i] * rho * VR[i]**2
+#     Cl = Slope_Cl * (Theta_star - Phi_result[i]) * deg2rad
+    
+#     dT[i] = Bcro * Cn * y[i]
+#     dQ[i] = Bcro * Ct * R[i] * y[i]
+    
+#     if np.isnan(dT[i]) or np.isinf(dT[i]):
+#         dT[i] = 0
+#     if np.isnan(dQ[i]) or np.isinf(dQ[i]):
+#         dQ[i] = 0
+
+# for i in range(Nsec):
+#     Thrust += 0.5 * dT[i]
+#     Torque += 0.5 * dQ[i]
+
+# print('Thrust = ', Thrust)
+# print('Torque = ', Torque)
