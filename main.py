@@ -102,16 +102,15 @@ for i in range(len(Sigma)):
 
 Theta_star = np.zeros(Nsec)
 for i in range(len(Theta_star)):
-    Theta_star[i] = (beta + Theta[i] - alpha0)
+    Theta_star[i] = (beta + Theta[i] - alpha0) * deg2rad
 
 Phi_result = np.zeros(Nsec)
 Reynolds = np.zeros(Nsec)
-VR = np.zeros(Nsec)
+UT = np.zeros(Nsec)
+UP = np.zeros(Nsec)
+U = np.zeros(Nsec)
 G = np.zeros(Nsec)
 alpha = np.zeros(Nsec)
-UP = np.zeros(Nsec)
-UT = np.zeros(Nsec)
-U = np.zeros(Nsec)
 Cl = np.zeros(Nsec)
 Cd = np.zeros(Nsec)
 dL = np.zeros(Nsec)
@@ -121,72 +120,77 @@ dQ = np.zeros(Nsec)
 phi = np.zeros(Nsec)
 dFx = np.zeros(Nsec)
 dFz = np.zeros(Nsec)
-
-T_new = 0
-T_old = 10000
-T = 0
+rambda = np.zeros(Nsec)
+gamma = np.zeros(Nsec)
 
 Vc = 0
-vi = 0.0001
+T = 0
+B = 0.95
 
-while np.abs(T_new - T_old) > 1e-2:
-    T_old = T_new
-    T_new = 0
+phi_left = 0
+phi_right = np.pi /2
+f_left = 0
+f_right = 0
+
+for i in range(Nsec):
+    gamma[i] = np.arctan(Cd[i] / Cl[i])
+    f_left = 4 * np.sin(phi_left)**2 - Sigma[i] * Cl * np.cos(phi_left + gamma[i]) / np.cos(gamma[i])
+    f_right = 4 * np.sin(phi_right)**2 - Sigma[i] * Cl * np.cos(phi_right + gamma[i]) / np.cos(gamma[i])
+
+for i in range(Nsec-1):
+    phi[i] = np.arctan(UP[i] / UT[i])
+    alpha[i] = (Theta_star[i]) - phi[i]
     
-    for i in range(Nsec-1):
-        xf = XFoil()
-        xf.airfoil = af.naca0012
-        xf.max_iter = 100
-        Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
+    UT[i] = omega * R[i]
+    UP[i] = Vc + vi
+    U[i] = np.sqrt(UT[i]**2 + UP[i]**2)
+    
+    xf = XFoil()
+    xf.airfoil = af.naca0012
+    xf.max_iter = 100
+    Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
+    xf.Re = Reynolds[i]
+    
+    Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i] * rad2deg)
+    while(np.isnan(Cl_) or np.isnan(Cd_)):
+        Reynolds[i] = Reynolds[i] + 1000
         xf.Re = Reynolds[i]
-        
-        UP[i] = Vc + vi
-        UT[i] = omega * R[i]
-        U[i] = np.sqrt(UT[i]**2 + UP[i]**2)
-        
-        phi[i] = np.arctan(UP[i]/UT[i])
-        alpha[i] = Theta_star[i] - phi[i]
-        
-        Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i])
-        while np.isnan(Cl_) or np.isnan(Cd_):
-            Reynolds[i] += 1000
-            xf.Re = Reynolds[i]
-            Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i])
-        Cl[i] = Cl_
-        Cd[i] = Cd_
-        
-        dL[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cl[i] * y[i]
-        dD[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cd[i] * y[i]
-        
-        dFx[i] = dL[i] * np.sin(phi[i]) + dD[i] * np.cos(phi[i])
-        dFz[i] = dL[i] * np.cos(phi[i]) - dD[i] * np.sin(phi[i])
-        
-        dT[i] = Nb * dFz[i]
-        dQ[i] = Nb * dFx[i] * R[i]
-        
-        T_new += dT[i]
+        Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i] * rad2deg)
+    Cl[i] = Cl_
+    Cd[i] = Cd_
     
-    vi = np.sqrt(T_new/(2*rho*A))
-    T = T_new
-    print('T_new = ', T_new)
-    print('T_old = ', T_old)
+    dL[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cl[i] * y[i]
+    dD[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cd[i] * y[i]
+    
+    dFx[i] = dL[i] * np.sin(phi[i]) + dD[i] * np.cos(phi[i])
+    dFz[i] = dL[i] * np.cos(phi[i]) - dD[i] * np.sin(phi[i])
+    
+    dT[i] = Nb * dFz[i]
+    dQ[i] = Nb * dFx[i] * R[i]
+    
+    T += dT[i]
+
+
 
 for i in range(Nsec-1):
     print('Reynolds[', i, '] = ', Reynolds[i])
+    print('UT[', i, '] = ', UT[i])
+    print('UP[', i, '] = ', UP[i])
+    print('U[', i, '] = ', U[i])
     print('theta[', i, '] = ', Theta[i])
     print('phi[', i, '] = ', phi[i])
     print('alpha[', i, '] = ', alpha[i])
-    print('UP[', i, '] = ', UP[i])
-    print('UT[', i, '] = ', UT[i])
-    print('U[', i, '] = ', U[i])
     print('Cl[', i, '] = ', Cl[i])
     print('Cd[', i, '] = ', Cd[i])
-    print('dL[', i, '] = ', dL[i])
-    print('dD[', i, '] = ', dD[i])
+    # print('dL[', i, '] = ', dL[i])
+    # print('dD[', i, '] = ', dD[i])
     print('dT[', i, '] = ', dT[i])
     print('dQ[', i, '] = ', dQ[i])
+print('T = ', T)
 
-print('Thrust = ', T)
+print('alpha = ', alpha*rad2deg)
+print('phi = ', phi*rad2deg)
+
 # for i in range(Nsec):
 #     xf = XFoil()
 #     xf.airfoil = af.naca0012
