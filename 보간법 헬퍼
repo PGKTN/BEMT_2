@@ -1,0 +1,9 @@
+F3::
+send, {Alt}
+send, {E}
+send, {I}
+send, {S}
+send, {enter}
+
+F4::
+ExitApp

@@ -5,15 +5,13 @@ import xlsxwriter as xw
 
 import calculator as ct
 import read_data as rd
-import airfoil_storage as af
-
-from xfoil import XFoil
 
 rpm2omega = 2 * np.pi / 60
 rad2deg = 180 / np.pi
 deg2rad = np.pi / 180
 
 rotor_path = r'C:\BEMT_2\rotor.ini'
+airfoil_path = r'C:\BEMT_2\airfoil.xlsx'
 
 config = cfp.ConfigParser()
 config.read(rotor_path)
@@ -45,16 +43,18 @@ rho = float(config.get(ini_section_fluid, ini_option_rho))
 mu = float(config.get(ini_section_fluid, ini_option_mu))
 
 # ini파일에서 값을 읽어와 string -> list로 변환.
-section = config.get(ini_section_rotor, ini_option_section).split(' ')
+sections = config.get(ini_section_rotor, ini_option_section).split(' ')
 
 # section의 개수.
-Nsec = len(section)
+Nsec = len(sections)
 
 # radius, chord, theta 값을 split으로 나눔과 동시에 float형으로 변환
 radius_ = [float(value) for value in config.get(ini_section_rotor, ini_option_radius).split(' ')]
 chord_ = [float(value) for value in config.get(ini_section_rotor, ini_option_chord).split(' ')]
 theta_ = [float(value) for value in config.get(ini_section_rotor, ini_option_theta).split(' ')]
 
+# 순서가 없는 list형식에서 순서가 있는 array형식으로 변환.
+section = np.array(sections)
 R = np.array(radius_)
 Chord= np.array(chord_)
 Theta = np.array(theta_)
@@ -72,124 +72,115 @@ Slope_Cl = 2 * np.pi
 beta = 0
 alpha0 = 0
 
-y = np.zeros(Nsec-1)
+y = np.zeros(Nsec)
 for i in range(len(y)):
-    y[i] = R[i+1] - R[i]
-print('y = ', y)
+    if i == 0:
+        y[i] = Rhub
+    else:
+        y[i] = R[i] - R[i-1]
 
 # Rsec = np.zeros(Nsec-1)
 # for i in range(len(Rsec)):
 #     Rsec[i] = Rhub + y[i]
 # print('Rsec = ', Rsec)
 
-dA = np.zeros(Nsec-1)
+dA = np.zeros(Nsec)
 for i in range(len(dA)):
-    dA[i] = Chord[i] * y[i]
+    if i == 0:
+        dA[i] = 0
+    else:
+        dA[i] = Chord[i] * y[i]
 
-Asec = np.zeros(Nsec-1)
+Asec = np.zeros(Nsec)
 for i in range(len(Asec)):
-    for j in range(i+1):
-        Asec[i] += dA[j]
-A = Asec[Nsec-2]
+    for j in range(i):
+        Asec[i] += dA[j+1]
+A = Asec[Nsec-1]
 
-Sigma = np.zeros(Nsec-1)
-for i in range(len(Sigma)):
-    Sigma[i] = (Nb * Asec[i]) / (np.pi * R[i+1]**2)
-
-# Vrat = np.zeros(Nsec)
-# for i in range(len(Vrat)):
-#     Vrat[i] = Vinf / (omega * R[i])
+sigma = np.zeros(Nsec)
+for i in range(len(sigma)):
+    if i == 0:
+        sigma[i] = 0
+    else:
+        sigma[i] = (Nb * Asec[i]) / (np.pi * R[i]**2)
 
 Theta_star = np.zeros(Nsec)
 for i in range(len(Theta_star)):
     Theta_star[i] = (beta + Theta[i] - alpha0) * deg2rad
 
-Phi_result = np.zeros(Nsec)
+gamma_left = np.zeros(Nsec)
+gamma_right = np.zeros(Nsec)
+alpha_left = np.zeros(Nsec)
+alpha_right = np.zeros(Nsec)
 Reynolds = np.zeros(Nsec)
-UT = np.zeros(Nsec)
-UP = np.zeros(Nsec)
-U = np.zeros(Nsec)
-G = np.zeros(Nsec)
 alpha = np.zeros(Nsec)
+phi = np.zeros(Nsec)
 Cl = np.zeros(Nsec)
 Cd = np.zeros(Nsec)
-dL = np.zeros(Nsec)
-dD = np.zeros(Nsec)
-dT = np.zeros(Nsec)
-dQ = np.zeros(Nsec)
-phi = np.zeros(Nsec)
-dFx = np.zeros(Nsec)
-dFz = np.zeros(Nsec)
-rambda = np.zeros(Nsec)
-gamma = np.zeros(Nsec)
 
-Vc = 0
-T = 0
-B = 0.95
 
-phi_left = 0
-phi_right = np.pi /2
+slope_Cl = np.pi * 2
 f_left = 0
-f_right = 0
+f_right = 1
 
 for i in range(Nsec):
-    gamma[i] = np.arctan(Cd[i] / Cl[i])
-    f_left = 4 * np.sin(phi_left)**2 - Sigma[i] * Cl * np.cos(phi_left + gamma[i]) / np.cos(gamma[i])
-    f_right = 4 * np.sin(phi_right)**2 - Sigma[i] * Cl * np.cos(phi_right + gamma[i]) / np.cos(gamma[i])
-
-for i in range(Nsec-1):
-    phi[i] = np.arctan(UP[i] / UT[i])
-    alpha[i] = (Theta_star[i]) - phi[i]
+    phi_left = 0
+    phi_right = np.pi / 2
+    phi_new = 0
+    alpha_new = 0
+    Cl_new = 0
+    Cd_new = 0
     
-    UT[i] = omega * R[i]
-    UP[i] = Vc + vi
-    U[i] = np.sqrt(UT[i]**2 + UP[i]**2)
-    
-    xf = XFoil()
-    xf.airfoil = af.naca0012
-    xf.max_iter = 100
     Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
-    xf.Re = Reynolds[i]
     
-    Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i] * rad2deg)
-    while(np.isnan(Cl_) or np.isnan(Cd_)):
-        Reynolds[i] = Reynolds[i] + 1000
-        xf.Re = Reynolds[i]
-        Cl_, Cd_, Cm_, Cp_ = xf.a(alpha[i] * rad2deg)
-    Cl[i] = Cl_
-    Cd[i] = Cd_
-    
-    dL[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cl[i] * y[i]
-    dD[i] = 0.5 * rho * U[i]**2 * Chord[i] * Cd[i] * y[i]
-    
-    dFx[i] = dL[i] * np.sin(phi[i]) + dD[i] * np.cos(phi[i])
-    dFz[i] = dL[i] * np.cos(phi[i]) - dD[i] * np.sin(phi[i])
-    
-    dT[i] = Nb * dFz[i]
-    dQ[i] = Nb * dFx[i] * R[i]
-    
-    T += dT[i]
+    f_not_equal_zero = True
+    num = 0
+    while f_not_equal_zero:
+        alpha_left = Theta_star[i] - phi_left
+        Cl_left = rd.Get_Coefficient(airfoil_path, section[i], 'Cl', Reynolds[i], alpha_left*rad2deg)
+        Cd_left = rd.Get_Coefficient(airfoil_path, section[i], 'Cd', Reynolds[i], alpha_left*rad2deg)
+        f_left = ct.f_Solver(phi_left, sigma[i], Cl_left, Cd_left)
+        
+        alpha_right = Theta_star[i] - phi_right
+        Cl_right = rd.Get_Coefficient(airfoil_path, section[i], 'Cl', Reynolds[i], alpha_right*rad2deg)
+        Cd_right = rd.Get_Coefficient(airfoil_path, section[i], 'Cd', Reynolds[i], alpha_right*rad2deg)
+        f_right = ct.f_Solver(phi_right, sigma[i], Cl_right, Cd_right)
+        print(num, '번째')
+        print('f_left = ', f_left)
+        print('f_right = ', f_right)
+        num += 1
+        if np.abs(f_left - f_right) < epsilon:
+            phi[i] = phi_new
+            alpha[i] = alpha_new
+            Cl[i] = Cl_new
+            Cd[i] = Cd_new
+            f_not_equal_zero = False
+        elif f_left * f_right > 0:
+            ValueError('f_left * f_right > 0')
+            exit()
+        elif f_left == 0 or f_right == 0:
+            phi[i] = 0
+            alpha[i] = Theta_star[i] - phi[i]
+            Cl[i] = 0
+            Cd[i] = 0
+            f_not_equal_zero = False
+        else:
+            phi_new = phi_left - (phi_right - phi_left)*(f_left)/(f_right - f_left)
+            alpha_new = Theta_star[i] - phi_new
+            Cl_new = rd.Get_Coefficient(airfoil_path, section[i], 'Cl', Reynolds[i], alpha_new*rad2deg)
+            Cd_new = rd.Get_Coefficient(airfoil_path, section[i], 'Cd', Reynolds[i], alpha_new*rad2deg)
+            f_new = ct.f_Solver(phi_new, sigma[i], Cl_new, Cd_new)
+            if f_new * f_left > 0:
+                phi_left = phi_new
+                f_left = f_new
+            else:
+                phi_right = phi_new
+                f_right = f_new
 
-
-
-for i in range(Nsec-1):
-    print('Reynolds[', i, '] = ', Reynolds[i])
-    print('UT[', i, '] = ', UT[i])
-    print('UP[', i, '] = ', UP[i])
-    print('U[', i, '] = ', U[i])
-    print('theta[', i, '] = ', Theta[i])
-    print('phi[', i, '] = ', phi[i])
-    print('alpha[', i, '] = ', alpha[i])
-    print('Cl[', i, '] = ', Cl[i])
-    print('Cd[', i, '] = ', Cd[i])
-    # print('dL[', i, '] = ', dL[i])
-    # print('dD[', i, '] = ', dD[i])
-    print('dT[', i, '] = ', dT[i])
-    print('dQ[', i, '] = ', dQ[i])
-print('T = ', T)
-
-print('alpha = ', alpha*rad2deg)
 print('phi = ', phi*rad2deg)
+print('alpha = ', alpha*rad2deg)
+print('Cl = ', Cl)
+print('Cd = ', Cd)
 
 # for i in range(Nsec):
 #     xf = XFoil()
@@ -202,8 +193,8 @@ print('phi = ', phi*rad2deg)
 #         xf.Re += xf.Re * 1000
 #         Cl, Cd, Cm, Cp = xf.a(Theta_star[i])
 
-#     SigCl = 0.25 * Sigma[i] * Cl
-#     SigCd = 0.25 * Sigma[i] * Cd
+#     SigCl = 0.25 * sigma[i] * Cl
+#     SigCd = 0.25 * sigma[i] * Cd
     
 #     G_left = -(SigCl * (Theta_star[i]*deg2rad) + Vrat[i] * SigCd)
 #     G_right = 1 + SigCd + Vrat[i]*SigCl*(np.pi/2 - (Theta_star[i]*deg2rad))
