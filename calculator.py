@@ -64,6 +64,10 @@ deg2rad = np.pi / 180
 #             sys.exit()
 #     return phi_arr
 
-def f_Solver(phi, sigma, Cl, Cd):
-    gamma = np.arctan(Cd / Cl)
-    return float(4 * np.sin(phi)**2 - sigma * Cl * np.cos(phi + gamma) / np.cos(gamma))
+def g_Solver(phi, sigma, slope_Cl, Theta_star, Cd_phi, V_rat):
+    
+    H = np.sin(phi) + 0.25 * sigma * Cd_phi
+    E = 0.25 * sigma * slope_Cl*(Theta_star - phi)
+    g = (H * np.sin(phi) - E * np.cos(phi)) - V_rat * (H * np.cos(phi) + E * np.sin(phi))
+    
+    return g

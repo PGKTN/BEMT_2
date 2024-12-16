@@ -2,9 +2,14 @@ import numpy as np
 import configparser as cfp
 import pandas as pd
 import xlsxwriter as xw
+import sys
+import time
+import threading
 
 import calculator as ct
 import read_data as rd
+
+
 
 rpm2omega = 2 * np.pi / 60
 rad2deg = 180 / np.pi
@@ -65,122 +70,175 @@ if Nsec != len(R) or Nsec != len(Chord) or Nsec != len(Theta):
 else :
     print('Sections 정상.')
 
-omega = RPM * rpm2omega
-epsilon = 1e-6
-Rtip = D / 2
-Slope_Cl = 2 * np.pi
-beta = 0
-alpha0 = 0
+RPM = 3000
+RPM_Thrust = []
+RPM_Torque = []
 
-y = np.zeros(Nsec)
-for i in range(len(y)):
-    if i == 0:
-        y[i] = Rhub
-    else:
-        y[i] = R[i] - R[i-1]
+while RPM < 8000:
+    omega = RPM * rpm2omega
+    epsilon = 1e-6
+    Rtip = D / 2
+    beta = 0
+    alpha0 = 0
+    V_for = Vinf
+    Vc = 0
 
-# Rsec = np.zeros(Nsec-1)
-# for i in range(len(Rsec)):
-#     Rsec[i] = Rhub + y[i]
-# print('Rsec = ', Rsec)
+    y = np.zeros(Nsec-1)
+    for i in range(len(y)):
+        y[i] = R[i+1] - R[i]
 
-dA = np.zeros(Nsec)
-for i in range(len(dA)):
-    if i == 0:
-        dA[i] = 0
-    else:
-        dA[i] = Chord[i] * y[i]
+    # Rsec = np.zeros(Nsec-1)
+    # for i in range(len(Rsec)):
+    #     Rsec[i] = Rhub + y[i]
+    # print('Rsec = ', Rsec)
 
-Asec = np.zeros(Nsec)
-for i in range(len(Asec)):
-    for j in range(i):
-        Asec[i] += dA[j+1]
-A = Asec[Nsec-1]
+    dA = np.zeros(Nsec)
+    for i in range(len(dA)):
+        if i == 0:
+            dA[i] = 0
+        else:
+            dA[i] = Chord[i-1] * y[i-1]
 
-sigma = np.zeros(Nsec)
-for i in range(len(sigma)):
-    if i == 0:
-        sigma[i] = 0
-    else:
+    Asec = np.zeros(Nsec)
+    for i in range(len(Asec)):
+        for j in range(i):
+            Asec[i] += dA[j+1]
+    A = Asec[-1]
+
+    sigma = np.zeros(Nsec)
+    for i in range(len(sigma)):
         sigma[i] = (Nb * Asec[i]) / (np.pi * R[i]**2)
 
-Theta_star = np.zeros(Nsec)
-for i in range(len(Theta_star)):
-    Theta_star[i] = (beta + Theta[i] - alpha0) * deg2rad
+    Theta_star = np.zeros(Nsec)
+    for i in range(len(Theta_star)):
+        Theta_star[i] = (beta + Theta[i] - alpha0) * deg2rad
 
-gamma_left = np.zeros(Nsec)
-gamma_right = np.zeros(Nsec)
-alpha_left = np.zeros(Nsec)
-alpha_right = np.zeros(Nsec)
-Reynolds = np.zeros(Nsec)
-alpha = np.zeros(Nsec)
-phi = np.zeros(Nsec)
-Cl = np.zeros(Nsec)
-Cd = np.zeros(Nsec)
+    alpha_left = np.zeros(Nsec)
+    alpha_right = np.zeros(Nsec)
+    Reynolds = np.zeros(Nsec)
+    alpha = np.zeros(Nsec)
+    phi = np.zeros(Nsec)
+    gamma = np.zeros(Nsec)
+    Cl = np.zeros(Nsec)
+    Cd = np.zeros(Nsec)
+    dT = np.zeros(Nsec)
+    dQ = np.zeros(Nsec)
 
+    T = 0
+    Q = 0
 
-slope_Cl = np.pi * 2
-f_left = 0
-f_right = 1
+    stop_event = threading.Event()
+    dot_thread = threading.Thread(target=rd.print_dots, args=(stop_event,))
+    dot_thread.start()
 
-for i in range(Nsec):
-    phi_left = 0
-    phi_right = np.pi / 2
-    phi_new = 0
-    alpha_new = 0
-    Cl_new = 0
-    Cd_new = 0
-    
-    Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
-    
-    f_not_equal_zero = True
-    num = 0
-    while f_not_equal_zero:
-        alpha_left = Theta_star[i] - phi_left
-        Cl_left = rd.Get_Coefficient(airfoil_path, section[i], 'Cl', Reynolds[i], alpha_left*rad2deg)
-        Cd_left = rd.Get_Coefficient(airfoil_path, section[i], 'Cd', Reynolds[i], alpha_left*rad2deg)
-        f_left = ct.f_Solver(phi_left, sigma[i], Cl_left, Cd_left)
+    slope_Cl = np.pi * 2
+    g_left = 0
+    g_right = 1
+
+    for i in range(Nsec):
+        phi_left = 0
+        phi_right = np.pi / 2
         
-        alpha_right = Theta_star[i] - phi_right
-        Cl_right = rd.Get_Coefficient(airfoil_path, section[i], 'Cl', Reynolds[i], alpha_right*rad2deg)
-        Cd_right = rd.Get_Coefficient(airfoil_path, section[i], 'Cd', Reynolds[i], alpha_right*rad2deg)
-        f_right = ct.f_Solver(phi_right, sigma[i], Cl_right, Cd_right)
-        print(num, '번째')
-        print('f_left = ', f_left)
-        print('f_right = ', f_right)
-        num += 1
-        if np.abs(f_left - f_right) < epsilon:
-            phi[i] = phi_new
-            alpha[i] = alpha_new
-            Cl[i] = Cl_new
-            Cd[i] = Cd_new
-            f_not_equal_zero = False
-        elif f_left * f_right > 0:
-            ValueError('f_left * f_right > 0')
-            exit()
-        elif f_left == 0 or f_right == 0:
-            phi[i] = 0
-            alpha[i] = Theta_star[i] - phi[i]
-            Cl[i] = 0
-            Cd[i] = 0
-            f_not_equal_zero = False
-        else:
-            phi_new = phi_left - (phi_right - phi_left)*(f_left)/(f_right - f_left)
-            alpha_new = Theta_star[i] - phi_new
-            Cl_new = rd.Get_Coefficient(airfoil_path, section[i], 'Cl', Reynolds[i], alpha_new*rad2deg)
-            Cd_new = rd.Get_Coefficient(airfoil_path, section[i], 'Cd', Reynolds[i], alpha_new*rad2deg)
-            f_new = ct.f_Solver(phi_new, sigma[i], Cl_new, Cd_new)
-            if f_new * f_left > 0:
-                phi_left = phi_new
-                f_left = f_new
+        Reynolds[i] = rho * omega * R[i] * Chord[i] / mu
+        
+        Cl_reynolds = rd.Get_Airfoil_Xlsx(airfoil_path, section[i], 'Cl')
+        Cd_reynolds = rd.Get_Airfoil_Xlsx(airfoil_path, section[i], 'Cd')
+        
+        V_rat = V_for / (omega * R[i])
+        
+        while True:
+            # alpha_left = Theta_star[i] - phi_left
+            # Cl_left = rd.Get_Coefficient(Cl_reynolds, Reynolds[i], alpha_left*rad2deg)
+            Cd_phi_left = rd.Get_Coefficient(Cd_reynolds, Reynolds[i], phi_left*rad2deg)
+            g_left = ct.g_Solver(phi_left, sigma[i], slope_Cl, Theta_star[i], Cd_phi_left, V_rat)
+            
+            # alpha_right = Theta_star[i] - phi_right
+            # Cl_right = rd.Get_Coefficient(Cl_reynolds, Reynolds[i], alpha_right*rad2deg)
+            Cd_phi_right = rd.Get_Coefficient(Cd_reynolds, Reynolds[i], phi_right*rad2deg)
+            g_right = ct.g_Solver(phi_right, sigma[i], slope_Cl, Theta_star[i], Cd_phi_right, V_rat)
+            # print('g_left = ', g_left)
+            # print('g_right = ', g_right)
+            if g_left == 0 or g_right == 0:
+                phi[i] = 0
+                alpha[i] = 0
+                Cl[i] = 0
+                Cd[i] = 0
+                break
+                
+            elif g_left * g_right > 0:
+                print('g_left = ', g_left)
+                print('g_right = ', g_right)
+                print('section ', i, '번째 오류, ', 'g_left * g_right > 0')
+                exit()
+                
+            elif g_left * g_right < 0 and np.abs(g_left + g_right) < epsilon:
+                phi[i] = phi_new
+                alpha[i] = Theta_star[i] - phi[i]
+                Cl[i] = rd.Get_Coefficient(Cl_reynolds, Reynolds[i], alpha[i]*rad2deg)
+                Cd[i] = rd.Get_Coefficient(Cd_reynolds, Reynolds[i], alpha[i]*rad2deg)
+                break
+                
+            elif g_left * g_right < 0:
+                phi_new = 0.5 * (phi_left + phi_right)
+                # phi_new = phi_left - (phi_right - phi_left)*(g_left)/(g_right - g_left)
+                Cd_phi_new = rd.Get_Coefficient(Cd_reynolds, Reynolds[i], phi_new*rad2deg)
+                g_new = ct.g_Solver(phi_new, sigma[i], slope_Cl, Theta_star[i], Cd_phi_new, V_rat)
+                if g_new * g_left > 0:
+                    # g_left = g_new
+                    # phi_new = phi_left - (phi_right - phi_left)*(g_left)/(g_right - g_left)
+                    phi_left = phi_new
+                else:
+                    # phi_new = phi_left - (phi_right - phi_left)*(g_left)/(g_right - g_left)
+                    phi_right = phi_new
+                    
             else:
-                phi_right = phi_new
-                f_right = f_new
+                pass
+        if Cl[i] != 0:
+            gamma[i] = np.arctan(Cd[i] / Cl[i])
+        else:
+            gamma[i] = 0
+            
+        G_phi = np.cos(phi[i]) + 0.25 * sigma[i] * Cl[i] * np.sin(phi[i]+gamma[i]) / (np.cos(gamma[i] * np.sin(phi[i])))
+        Vr = omega*R[i]/G_phi
+        
+        if i == 0:
+            dT[i] = 0
+            dQ[i] = 0
+        else:
+            dT[i] = 0.5 * Nb * Chord[i-1] * rho * Vr**2 * (Cl[i-1]*np.cos(phi[i-1]) - Cd[i-1]*np.sin(phi[i-1])) * y[i-1]
+            dQ[i] = 0.5 * Nb * Chord[i-1] * rho * Vr**2 * (Cl[i-1]*np.sin(phi[i-1]) + Cd[i-1]*np.cos(phi[i-1])) * R[i-1] * y[i-1]
+        
+        T += dT[i]
+        Q += dQ[i]
+        
+        print(' ')
+        print(f'section {i}번째 완료')
+    RPM_Thrust.append(T)
+    RPM_Torque.append(Q)
+    
+    stop_event.set()
+    dot_thread.join()
 
-print('phi = ', phi*rad2deg)
-print('alpha = ', alpha*rad2deg)
-print('Cl = ', Cl)
-print('Cd = ', Cd)
+    vi = np.sqrt((T)/(2 * A * rho))
+    J = vi / (RPM * D)
+    
+    RPM += 500
+
+
+for i in range(len(RPM_Thrust)):
+    print(f'RPM = {3000+i*500}, Thrust = {RPM_Thrust[i]}, Torque = {RPM_Torque[i]}')
+    
+# print('phi = ', phi*rad2deg)
+# print('alpha = ', alpha*rad2deg)
+# print('Cl = ', Cl)
+# print('Cd = ', Cd)
+# print('vi = ', vi)
+# print('J = ', J)
+# print('dT = ', dT)
+# print('dQ = ', dQ)
+# print('Thrust = ', T)
+# print('Torque = ', Q)
+
 
 # for i in range(Nsec):
 #     xf = XFoil()

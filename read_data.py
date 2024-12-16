@@ -55,19 +55,36 @@ def get_rotor_data(rotor_path):
         print('sections_count 정상.')
         return rpm, v_inf, nblades, diameter, radius_hub, section, radius, chord, pitch, rho, mu
 
-def Get_Coefficient(airfoil_path, airfoil, coefficient, Reynolds, alpha):
-    col_index = int(Reynolds / 10000) + 65
+def Get_Airfoil_Xlsx(airfoil_path, airfoil, coefficient):
     sheet_name = airfoil + '_' + coefficient
-    col1 = pd.read_excel(airfoil_path, sheet_name = sheet_name, usecols = chr(col_index))
-    col2 = pd.read_excel(airfoil_path, sheet_name = sheet_name, usecols = chr(col_index+1))
+    
+    df = pd.read_excel(airfoil_path, sheet_name = sheet_name)
+    Ncol = df.shape[1]
+    
+    start_num = 66
+    
+    Co_reynolds = []
+    for i in range(Ncol-1):
+        if i < 25:
+            col_data = pd.read_excel(airfoil_path, sheet_name = sheet_name, usecols = chr(start_num+i))
+        else:
+            col_data = pd.read_excel(airfoil_path, sheet_name = sheet_name, usecols = 'A' + chr(start_num+i-26))
+        Co_reynolds.append(col_data.values.flatten())
+    Co_reynolds = np.array(Co_reynolds)
+    return Co_reynolds
+
+def Get_Coefficient(Co_reynolds, Reynolds, alpha):
+    col_index = int(Reynolds / 10000) - 1
+    col1 = Co_reynolds[col_index]
+    col2 = Co_reynolds[col_index+1]
     
     row1 = int(alpha+180)
     row2 = int(alpha+180)+1
     
-    Co_11 = col1.iloc[row1, 0]
-    Co_12 = col1.iloc[row2, 0]
-    Co_21 = col2.iloc[row1, 0]
-    Co_22 = col2.iloc[row2, 0]
+    Co_11 = col1[row1]
+    Co_12 = col1[row2]
+    Co_21 = col2[row1]
+    Co_22 = col2[row2]
     
     Rey1 = int(Reynolds / 10000) * 10000
     Rey2 = int(Reynolds / 10000) * 10000 + 10000
@@ -80,3 +97,17 @@ def Get_Coefficient(airfoil_path, airfoil, coefficient, Reynolds, alpha):
     Co = num1*(np.abs(alpha-alpha1)/np.abs(alpha2-alpha1)) + num2*(np.abs(alpha-alpha2)/np.abs(alpha2-alpha1))
     
     return Co
+
+import sys
+import time
+
+def print_dots(stop_event):
+    dots = ['.', '..', '...', '....']
+    while not stop_event.is_set():
+        for dot in dots:
+            if stop_event.is_set():
+                break
+            sys.stdout.write(f'\r{dot}')
+            sys.stdout.flush()
+            time.sleep(0.1)
+        sys.stdout.write('\r    \r')
